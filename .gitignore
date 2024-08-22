@@ -1,0 +1,5 @@
+.env
+*.buckets
+certs/
+data/
+node_modules/
