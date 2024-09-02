@@ -30,7 +30,28 @@ const fetchActualAccounts = async () => {
   return [...apiAccounts];
 };
 
-const fetchBucketsCategories = () => {};
+const fetchBucketsCategories = () => {
+  // GET Groups and Categories from Buckets DB
+  const getBucketGroups = sqliteDB.prepare(
+    `SELECT bucket.name AS bucketName,
+      bucket.id AS bucketId, 
+      COALESCE(bucket_group.name, 'Misc') AS groupName
+    FROM bucket
+    LEFT JOIN bucket_group ON bucket.group_id=bucket_group.id;`
+  );
+  const bucketCategories = {};
+  for (const obj of getBucketGroups.all()) {
+    if (obj.bucketId == "x-license") {
+      continue;
+    }
+    bucketCategories[obj.bucketId] = {
+      name: obj.bucketName,
+      group: obj.groupName,
+    };
+  }
+  console.log(bucketCategories);
+  return bucketCategories;
+};
 
 const transferAccounts = async (bucketAccounts) => {
   // Create accounts in actual and save the actual account id
@@ -72,6 +93,9 @@ const main = async () => {
 
   // Move Accounts from Buckets to Actual
   transferAccounts(bucketAccounts);
+
+  // Fetch Bucket Groups and Buckets (aka Categories)
+  fetchBucketsCategories();
   // TODO get budget_group + budget nested list via SQL join query
   // TODO create category schema in actual budget
 
