@@ -1,43 +1,77 @@
 const api = require("@actual-app/api");
 const { DatabaseSync } = require("node:sqlite");
+let sqliteDB = undefined;
 
-const main = async () => {
-  await api.init({
-    // Budget data will be cached locally here, in subdirectories for each file.
-    dataDir: process.env.DATADIR,
-    // This is the URL of your running server
-    serverURL: process.env.SERVERURL,
-    // This is the password you use to log into the server
-    password: process.env.PASSWORD,
-  });
-
-  // Fetch actual budget to be imported to *ideally fresh*
-  await api.downloadBudget(process.env.BUDGETID, {
-    password: process.env.BUDGETPASS,
-  });
-
+const initBucketDB = async () => {
   // Open the buckets file to be imported (sqlite file)
-  const database = new DatabaseSync("./backup.buckets");
+  sqliteDB = new DatabaseSync(process.env.BUCKETS_FILE);
+};
 
-  // Get accounts from buckets and transform into key value object
-  const getAccounts = database.prepare(
+const fetchBucketAccounts = () => {
+  // Get accounts from Buckets DB
+  const getBucketAccts = sqliteDB.prepare(
     `SELECT id, name, starting_balance FROM account;`
   );
-  const accounts = {};
-  for (const obj of getAccounts.all()) {
-    accounts[obj.id] = { name: obj.name, initial: obj.starting_balance };
+  // Tranform DB output to JSON object
+  const bucketAccounts = {};
+  for (const obj of getBucketAccts.all()) {
+    bucketAccounts[obj.id] = {
+      name: obj.name,
+      initial: obj.starting_balance,
+    };
   }
+  console.log(bucketAccounts);
+  return bucketAccounts;
+};
+
+const fetchActualAccounts = async () => {
+  // Fetch Current Accounts from ActualBudget
+  const apiAccounts = await api.getAccounts();
+  return [...apiAccounts];
+};
+
+const fetchBucketsCategories = () => {};
+
+const transferAccounts = async (bucketAccounts) => {
   // Create accounts in actual and save the actual account id
-  for (const [id, account] of Object.entries(accounts)) {
+  for (const [id, account] of Object.entries(bucketAccounts)) {
     // TODO Check if account already in list (helps w/ dev)
     account["actualId"] = await api.createAccount(
       { name: account.name, type: "other" },
       account.initial
     );
   }
+};
 
-  console.log(accounts);
+const DEBUGdeleteActualAccounts = async (actualAccounts) => {
+  for (let account of actualAccounts) {
+    await api.deleteAccount(account.id);
+  }
+};
 
+const main = async () => {
+  // Initialize Actual API connection
+  await api.init({
+    dataDir: process.env.DATA_DIR,
+    serverURL: process.env.ACTUAL_URL,
+    password: process.env.ACTUAL_PASSWORD,
+  });
+
+  // Fetch actual budget to be imported to
+  await api.downloadBudget(process.env.ACTUAL_SYNC_ID, {
+    password: process.env.ACTUAL_PASSWORD,
+  });
+
+  // Initialize Buckets SQLite DB connection
+  initBucketDB();
+
+  // Fetch Accounts
+  const bucketAccounts = fetchBucketAccounts();
+  let actualAccounts = await fetchActualAccounts();
+  DEBUGdeleteActualAccounts(actualAccounts);
+
+  // Move Accounts from Buckets to Actual
+  transferAccounts(bucketAccounts);
   // TODO get budget_group + budget nested list via SQL join query
   // TODO create category schema in actual budget
 
