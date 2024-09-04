@@ -70,6 +70,18 @@ const DEBUGdeleteActualAccounts = async (actualAccounts) => {
   }
 };
 
+const DEBUGdeleteActualCategories = async () => {
+  const catGroups = await api.getCategoryGroups();
+  for (let group of catGroups) {
+    if (group.name != "Income") {
+      for (let cat of group.categories) {
+        api.deleteCategory(cat.id);
+      }
+      api.deleteCategoryGroup(group.id);
+    }
+  }
+};
+
 const main = async () => {
   // Initialize Actual API connection
   await api.init({
@@ -95,7 +107,8 @@ const main = async () => {
   transferAccounts(bucketAccounts);
 
   // Fetch Bucket Groups and Buckets (aka Categories)
-  fetchBucketsCategories();
+  const bucketCategories = fetchBucketsCategories();
+  DEBUGdeleteActualCategories();
   // TODO get budget_group + budget nested list via SQL join query
   // TODO create category schema in actual budget
 
