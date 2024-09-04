@@ -35,6 +35,7 @@ const fetchBucketsCategories = () => {
   );
   const bucketCategories = {};
   for (const obj of getBucketGroups.all()) {
+    // Ignore Buckets' unlicenced category
     if (obj.bucketId == "x-license") {
       continue;
     }
@@ -50,7 +51,6 @@ const fetchBucketsCategories = () => {
 const transferAccounts = async (bucketAccounts) => {
   // Create accounts in actual and save the actual account id
   for (const [id, account] of Object.entries(bucketAccounts)) {
-    // TODO Check if account already in list (helps w/ dev)
     account["actualId"] = await api.createAccount(
       { name: account.name, type: "other" },
       account.initial
@@ -68,6 +68,7 @@ const DEBUGdeleteActualAccounts = async () => {
 const DEBUGdeleteActualCategories = async () => {
   const catGroups = await api.getCategoryGroups();
   for (let group of catGroups) {
+    // Ignore Income Group, as Actual Budget will break if removed
     if (group.name != "Income") {
       for (let cat of group.categories) {
         api.deleteCategory(cat.id);
