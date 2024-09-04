@@ -24,12 +24,6 @@ const fetchBucketAccounts = () => {
   return bucketAccounts;
 };
 
-const fetchActualAccounts = async () => {
-  // Fetch Current Accounts from ActualBudget
-  const apiAccounts = await api.getAccounts();
-  return [...apiAccounts];
-};
-
 const fetchBucketsCategories = () => {
   // GET Groups and Categories from Buckets DB
   const getBucketGroups = sqliteDB.prepare(
@@ -64,7 +58,8 @@ const transferAccounts = async (bucketAccounts) => {
   }
 };
 
-const DEBUGdeleteActualAccounts = async (actualAccounts) => {
+const DEBUGdeleteActualAccounts = async () => {
+  const actualAccounts = await api.getAccounts();
   for (let account of actualAccounts) {
     await api.deleteAccount(account.id);
   }
@@ -98,17 +93,18 @@ const main = async () => {
   // Initialize Buckets SQLite DB connection
   initBucketDB();
 
-  // Fetch Accounts
-  const bucketAccounts = fetchBucketAccounts();
-  let actualAccounts = await fetchActualAccounts();
-  DEBUGdeleteActualAccounts(actualAccounts);
+  // Remove Any Existing Actual accounts
+  DEBUGdeleteActualAccounts();
 
   // Move Accounts from Buckets to Actual
+  const bucketAccounts = fetchBucketAccounts();
   transferAccounts(bucketAccounts);
+
+  // Remove Any Existing Actual Groups/Categories (except Income)
+  DEBUGdeleteActualCategories();
 
   // Fetch Bucket Groups and Buckets (aka Categories)
   const bucketCategories = fetchBucketsCategories();
-  DEBUGdeleteActualCategories();
   // TODO get budget_group + budget nested list via SQL join query
   // TODO create category schema in actual budget
 
