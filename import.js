@@ -13,15 +13,16 @@ const fetchBucketAccounts = () => {
     `SELECT id, name, starting_balance FROM account;`
   );
   // Tranform DB output to JSON object
-  const bucketAccounts = {};
+  const accountIdMap = {};
   for (const obj of getBucketAccts.all()) {
-    bucketAccounts[obj.id] = {
+    accountIdMap[obj.id] = {
       name: obj.name,
       initial: obj.starting_balance,
+      actualId: null,
     };
   }
-  console.log(bucketAccounts);
-  return bucketAccounts;
+  console.log(accountIdMap);
+  return accountIdMap;
 };
 
 const fetchBucketGroups = () => {
@@ -43,6 +44,7 @@ const fetchBucketGroups = () => {
       catIdMap[bucket.bucketId] = {
         name: bucket.bucketName,
         group: bucket.groupName,
+        actualId: null,
       };
       // Add nested category under group map
       groupCatMap[bucket.groupName] = [
@@ -56,14 +58,15 @@ const fetchBucketGroups = () => {
   return [catIdMap, groupCatMap];
 };
 
-const transferAccounts = async (bucketAccounts) => {
+const transferAccounts = async (accountIdMap) => {
   // Create accounts in actual and save the actual account id
-  for (const [id, account] of Object.entries(bucketAccounts)) {
-    account["actualId"] = await api.createAccount(
+  for (const [id, account] of Object.entries(accountIdMap)) {
+    accountIdMap[id].actualId = await api.createAccount(
       { name: account.name, type: "other" },
       account.initial
     );
   }
+  console.log(accountIdMap);
 };
 
 const transferCategories = async (bucketGroups) => {};
