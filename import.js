@@ -24,7 +24,7 @@ const fetchBucketAccounts = () => {
   return bucketAccounts;
 };
 
-const fetchBucketsCategories = () => {
+const fetchBucketGroups = () => {
   // GET Groups and Categories from Buckets DB
   const getBucketGroups = sqliteDB.prepare(
     `SELECT bucket.name AS bucketName,
@@ -33,19 +33,27 @@ const fetchBucketsCategories = () => {
     FROM bucket
     LEFT JOIN bucket_group ON bucket.group_id=bucket_group.id;`
   );
-  const bucketCategories = {};
-  for (const obj of getBucketGroups.all()) {
+  const catIdMap = {};
+  const groupCatMap = {};
+  for (const bucket of getBucketGroups.all()) {
     // Ignore Buckets' unlicenced category
-    if (obj.bucketId == "x-license") {
-      continue;
+    if (bucket.bucketId == "x-license") continue;
+    else {
+      // Add category to ID map
+      catIdMap[bucket.bucketId] = {
+        name: bucket.bucketName,
+        group: bucket.groupName,
+      };
+      // Add nested category under group map
+      groupCatMap[bucket.groupName] = [
+        { name: bucket.bucketName, id: bucket.bucketId },
+        ...(groupCatMap[bucket.groupName] ? groupCatMap[bucket.groupName] : []),
+      ];
     }
-    bucketCategories[obj.bucketId] = {
-      name: obj.bucketName,
-      group: obj.groupName,
-    };
   }
-  console.log(bucketCategories);
-  return bucketCategories;
+  console.log("cat ID map", catIdMap);
+  console.log("nested groups", groupCatMap);
+  return [catIdMap, groupCatMap];
 };
 
 const transferAccounts = async (bucketAccounts) => {
@@ -57,6 +65,8 @@ const transferAccounts = async (bucketAccounts) => {
     );
   }
 };
+
+const transferCategories = async (bucketGroups) => {};
 
 const DEBUGdeleteActualAccounts = async () => {
   const actualAccounts = await api.getAccounts();
@@ -98,14 +108,14 @@ const main = async () => {
   DEBUGdeleteActualAccounts();
 
   // Move Accounts from Buckets to Actual
-  const bucketAccounts = fetchBucketAccounts();
-  transferAccounts(bucketAccounts);
+  const accountIdMap = fetchBucketAccounts();
+  transferAccounts(accountIdMap);
 
   // Remove Any Existing Actual Groups/Categories (except Income)
   DEBUGdeleteActualCategories();
 
   // Fetch Bucket Groups and Buckets (aka Categories)
-  const bucketCategories = fetchBucketsCategories();
+  const [catIdMap, groupCatMap] = fetchBucketGroups();
   // TODO get budget_group + budget nested list via SQL join query
   // TODO create category schema in actual budget
 
