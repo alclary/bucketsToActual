@@ -100,9 +100,10 @@ const main = async () => {
   });
 
   // Fetch actual budget to be imported to
-  await api.downloadBudget(process.env.ACTUAL_SYNC_ID, {
-    password: process.env.ACTUAL_PASSWORD,
-  });
+  await api.downloadBudget(process.env.ACTUAL_SYNC_ID);
+  // await api.downloadBudget(process.env.ACTUAL_SYNC_ID, {
+  //   password: process.env.ACTUAL_PASSWORD,
+  // });
 
   // Initialize Buckets SQLite DB connection
   initBucketDB();
