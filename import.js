@@ -58,7 +58,7 @@ const fetchBucketGroups = () => {
   return [catIdMap, groupCatMap];
 };
 
-const transferAccounts = async (accountIdMap) => {
+const moveAccounts = async (accountIdMap) => {
   // Create accounts in actual and save the actual account id
   for (const [id, account] of Object.entries(accountIdMap)) {
     accountIdMap[id].actualId = await api.createAccount(
@@ -69,7 +69,16 @@ const transferAccounts = async (accountIdMap) => {
   console.log(accountIdMap);
 };
 
-const transferCategories = async (bucketGroups) => {};
+const moveCategories = async (groupMap, catIds) => {
+  for (const parent in groupMap) {
+    actualParentId = await api.createCategoryGroup({ name: parent })
+    console.log(parent)
+    for (const [id, subGroup] of Object.entries(groupMap[parent])) {
+      console.log(subGroup)
+      catIds[subGroup.id].actualId = await api.createCategory({name: subGroup.name, group_id: actualParentId})
+    }
+  }
+};
 
 const DEBUGdeleteActualAccounts = async () => {
   const actualAccounts = await api.getAccounts();
@@ -113,16 +122,17 @@ const main = async () => {
 
   // Move Accounts from Buckets to Actual
   const accountIdMap = fetchBucketAccounts();
-  transferAccounts(accountIdMap);
-
-  // Remove Any Existing Actual Groups/Categories (except Income)
-  DEBUGdeleteActualCategories();
+  moveAccounts(accountIdMap);
 
   // Fetch Bucket Groups and Buckets (aka Categories)
-  const [catIdMap, groupCatMap] = fetchBucketGroups();
-  // TODO get budget_group + budget nested list via SQL join query
-  // TODO create category schema in actual budget
+  const [catIds, groupMap] = fetchBucketGroups();
 
+// Remove Any Existing Actual Groups/Categories (except Income)
+  await DEBUGdeleteActualCategories();
+
+  // Create category schema in Actual and update catIds in place with Actual category ID
+  await moveCategories(groupMap, catIds);
+  console.log("Updates accocunt", accountIdMap)
   // TODO get full transaction list
   // TODO special handle tranfer transactions?
   // TODO insert all other transactions?
