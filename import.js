@@ -100,6 +100,13 @@ const DEBUGdeleteActualCategories = async () => {
   }
 };
 
+const DEBUGdeleteActualTransactions = async () => {
+  const transactions = await api.getTransactions();
+  for (let transaction of transactions){
+    api.deleteTransaction(transaction.id);
+  }
+}
+
 const main = async () => {
   // Initialize Actual API connection
   await api.init({
