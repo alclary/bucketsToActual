@@ -13,20 +13,19 @@ const fetchBucketAccounts = () => {
     `SELECT id, name, starting_balance FROM account;`
   );
   // Tranform DB output to JSON object
-  const accountIdMap = {};
+  const acountIds = {};
   for (const obj of getBucketAccts.all()) {
-    accountIdMap[obj.id] = {
+    acountIds[obj.id] = {
       name: obj.name,
       initial: obj.starting_balance,
       actualId: null,
     };
   }
-  console.log(accountIdMap);
-  return accountIdMap;
+  return acountIds;
 };
 
 const fetchBucketGroups = () => {
-  // GET Groups and Categories from Buckets DB
+  // Get Groups and Categories from Buckets DB
   const getBucketGroups = sqliteDB.prepare(
     `SELECT bucket.name AS bucketName,
       bucket.id AS bucketId, 
@@ -34,51 +33,121 @@ const fetchBucketGroups = () => {
     FROM bucket
     LEFT JOIN bucket_group ON bucket.group_id=bucket_group.id;`
   );
-  const catIdMap = {};
-  const groupCatMap = {};
+  const catIds = {};
+  const catByGroup = {};
   for (const bucket of getBucketGroups.all()) {
     // Ignore Buckets' unlicenced category
     if (bucket.bucketId == "x-license") continue;
     else {
       // Add category to ID map
-      catIdMap[bucket.bucketId] = {
+      catIds[bucket.bucketId] = {
         name: bucket.bucketName,
         group: bucket.groupName,
         actualId: null,
       };
       // Add nested category under group map
-      groupCatMap[bucket.groupName] = [
+      catByGroup[bucket.groupName] = [
         { name: bucket.bucketName, id: bucket.bucketId },
-        ...(groupCatMap[bucket.groupName] ? groupCatMap[bucket.groupName] : []),
+        ...(catByGroup[bucket.groupName] ? catByGroup[bucket.groupName] : []),
       ];
     }
   }
-  console.log("cat ID map", catIdMap);
-  console.log("nested groups", groupCatMap);
-  return [catIdMap, groupCatMap];
+  return [catIds, catByGroup];
 };
 
-const moveAccounts = async (accountIdMap) => {
-  // Create accounts in actual and save the actual account id
-  for (const [id, account] of Object.entries(accountIdMap)) {
-    accountIdMap[id].actualId = await api.createAccount(
+const fetchTransactions = () => {
+  // Get all transactions from BucketDB in with categories and xfer indication
+  const getTransactions = sqliteDB.prepare(
+    `SELECT 
+	    account_transaction.id,
+      account_transaction.created AS 'date',
+      account_transaction.account_id,
+      bucket_transaction.bucket_id AS category_id,
+      CASE 
+        WHEN account_transaction.general_cat = 'transfer' THEN 1
+        ELSE 0
+      END AS transfer,
+      COALESCE (bucket_transaction.amount, account_transaction.amount) AS amount,
+      account_transaction.memo
+    FROM account_transaction
+    FULL JOIN bucket_transaction ON account_transaction.id=bucket_transaction.account_trans_id
+    WHERE account_transaction.id IS NOT NULL
+    ORDER BY 'date', account_transaction.id`
+  )
+  return getTransactions.all()
+}
+
+const importAccounts = async (acountIds) => {
+  // Create accounts in actual and save the actual account to local object
+  for (const [i, account] of Object.entries(acountIds)) {
+    acountIds[i].actualId = await api.createAccount(
       { name: account.name, type: "other" },
       account.initial
     );
   }
-  console.log(accountIdMap);
 };
 
-const moveCategories = async (groupMap, catIds) => {
-  for (const parent in groupMap) {
+const importCategories = async (catByGroup, catIds) => {
+  for (const parent in catByGroup) {
     actualParentId = await api.createCategoryGroup({ name: parent })
-    console.log(parent)
-    for (const [id, subGroup] of Object.entries(groupMap[parent])) {
-      console.log(subGroup)
-      catIds[subGroup.id].actualId = await api.createCategory({name: subGroup.name, group_id: actualParentId})
+    for (const [i, subGroup] of Object.entries(catByGroup[parent])) {
+      try {
+        catIds[subGroup.id].actualId = await api.createCategory({
+          name: subGroup.name || `Misc ${i}`, // Unamed as "Misc i"
+          group_id: actualParentId
+      })}
+      catch (err) {
+        // Log warning to console (likely a duplicate bucket/category)
+        console.warn(err.message)
+        continue
+      }
+    } 
+  }
+}
+
+const importTransactions = async (transactions) => {
+  const completed = []
+  for (const [i, transaction] of Object.entries(transactions)) {
+    // If transaction in already completed list (search backwards), continue
+    if (completed.includes(parseInt(i))) {
+      continue
+    }
+    // If transaction is a transfer search ahead in array to locate match
+    else if (transaction.transfer) {
+      findTransferMatch(transactions, i, completed);
+    }
+    // All standard transactions (non-transfers)
+    else {
+      // TODO INSERT Standard Transaction
+    }
     }
   }
-};
+
+const findTransferMatch = (transactionList, currentIterator, completed) => {
+  // If xfer is last element, break (no match)
+  if (parseInt(currentIterator) == transactionList.length - 1) {
+    console.warn("WARNING: Last element is transfer. No matching transaction.")
+    return
+  }
+  else {
+    for (k = parseInt(currentIterator) + 1; k < transactionList.length; k++) {
+      if (transactionList[k].category_id === null && 
+        (transactionList[k].amount == transactionList[currentIterator].amount * -1)) {
+        // DEBUG 
+        //console.log("MATCHED:", currentIterator, "and", k)
+        // Import Transfer Transaction to Actual
+        
+        // Add matched transaction to completed list, to skip in subsequent iteration
+        completed.push(k)
+        return
+      }
+      else if (k == transactionList.length - 1) {
+        console.error(`ERROR: Transfer transaction ${currentIterator} is unmatched.`)
+        return
+      }
+    }
+  }
+}
 
 const DEBUGdeleteActualAccounts = async () => {
   const actualAccounts = await api.getAccounts();
@@ -115,37 +184,37 @@ const main = async () => {
     password: process.env.ACTUAL_PASSWORD,
   });
 
-  // Fetch actual budget to be imported to
+  // Fetch actual budget
   await api.downloadBudget(process.env.ACTUAL_SYNC_ID);
-  // await api.downloadBudget(process.env.ACTUAL_SYNC_ID, {
-  //   password: process.env.ACTUAL_PASSWORD,
-  // });
 
   // Initialize Buckets SQLite DB connection
   initBucketDB();
 
-  // Remove Any Existing Actual accounts
-  DEBUGdeleteActualAccounts();
-
-  // Move Accounts from Buckets to Actual
-  const accountIdMap = fetchBucketAccounts();
-  moveAccounts(accountIdMap);
-
-  // Fetch Bucket Groups and Buckets (aka Categories)
-  const [catIds, groupMap] = fetchBucketGroups();
-
-// Remove Any Existing Actual Groups/Categories (except Income)
+  // Remove Any Existing Actual Data
+  await DEBUGdeleteActualAccounts();
   await DEBUGdeleteActualCategories();
+  await DEBUGdeleteActualTransactions();
 
-  // Create category schema in Actual and update catIds in place with Actual category ID
-  await moveCategories(groupMap, catIds);
-  console.log("Updates accocunt", accountIdMap)
-  // TODO get full transaction list
-  // TODO special handle tranfer transactions?
-  // TODO insert all other transactions?
+  // Fetch and Import Accounts
+  const acountIds = fetchBucketAccounts();
+  await importAccounts(acountIds);
 
-  //let groups = await api.getCategoryGroups();
-  //console.log(groups);
+  // Fetch and Import Categories (aka "Buckets")
+  const [catIds, catByGroup] = fetchBucketGroups();
+  await importCategories(catByGroup, catIds);
+
+  // DEBUG
+  // console.log("Accounts:", acountIds)
+  // console.log("Categories", catIds);
+
+  // Fetch and Import Transactions
+  const transactions = fetchTransactions();
+  // DEBUG
+  console.log(transactions)
+  await importTransactions(transactions);
+
+
+
   await api.shutdown();
 };
 
