@@ -105,33 +105,49 @@ const importCategories = async (catByGroup, catIds) => {
   }
 }
 
-const processTransactions = async (transactions, accountIds, catIds) => {
-  const completed = []
+const processTransactions = async (transactions, accountIds, catIds, payees) => {
+  const skip = []
   for (const [i, transaction] of Object.entries(transactions)) {
-    // If transaction in already completed list (search backwards), continue
-    if (completed.includes(parseInt(i))) {
+    // If transaction in already skip list (search backwards), continue
+    if (skip.includes(parseInt(i))) {
       continue
     }
     // If transaction is a transfer, search ahead in array to locate match and link it
     else if (transaction.transfer) {
-      processTransfers(transactions, i, completed);
+      processTransfers(transactions, i, skip, accountIds, payees);
     }
-    // Translate original (Buckets) ids and data to Actual Ids
-    transaction.date = transaction.date.split(" ")[0] // Remove timestamp
-    transaction.account = accountIds[transaction.account_id].actualId
-    if (transaction.category) {
-      transaction.category = catIds[transaction.category].actualId
-    }
-    transaction.cleared = true
-    }
-  // remove the transfer duplicate rows from transactions array
-  for (let index of completed) {
-    transactions.splice(index, 1)
   }
-  return transactions
+  // Create a clean transaction array
+  const cleaned_transactions = []
+  for (const [i, transaction] of Object.entries(transactions)) {
+    if (skip.includes(parseInt(i))) {
+      continue
+    }
+    else {
+      let clean_transaction = {
+        account: accountIds[transaction.account_id].actualId,
+        date: transaction.date.split(" ")[0],
+        amount: transaction.amount,
+        notes: transaction.notes,
+        cleared: true
+      }
+      if (transaction.category) {
+        clean_transaction['category'] = catIds[transaction.category].actualId
+      }
+      if (transaction.payee) {
+        clean_transaction['payee'] = transaction.payee
+      }
+      // if (transaction.transfer_id) {
+      //   clean_transaction['transfer_id'] = transaction.transfer_id
+      // }
+      // console.log(clean_transaction)
+      cleaned_transactions.push(clean_transaction)
+    }
   }
+  return cleaned_transactions
+}
 
-const processTransfers = (transactionList, currentIterator, completed) => {
+const processTransfers = (transactionList, currentIterator, skip, accountIds, payees) => {
   // If xfer is last element, break (no match)
   if (parseInt(currentIterator) == transactionList.length - 1) {
     console.warn("WARNING: Last element is transfer. No matching transaction.")
@@ -144,9 +160,10 @@ const processTransfers = (transactionList, currentIterator, completed) => {
         // DEBUG 
         // console.log("MATCHED:", currentIterator, "and", k)
         // Set 'transfer_id' to indicate account of matched transaction
-        transactionList[currentIterator].transfer_id = transactionList[k].account_id
-        // Add matched transaction to completed list, to skip in subsequent iteration
-        completed.push(k)
+        let match_actualId = accountIds[transactionList[k].account_id].actualId
+        transactionList[currentIterator]['payee'] = payees[match_actualId]
+        // Add matched transaction to skip list, to skip in subsequent iteration
+        skip.push(k)
         return
       }
       else if (k == transactionList.length - 1) {
@@ -157,13 +174,23 @@ const processTransfers = (transactionList, currentIterator, completed) => {
   }
 }
 
+const fetchPayees = async () => {
+  const raw_payees = await api.getPayees()
+  const clean_payees = {}
+  for (let payee of raw_payees) {
+    if (payee.transfer_acct === null) continue
+    clean_payees[payee.transfer_acct] = payee.id
+  }
+  return clean_payees
+}
+
 const importTransactions = async (transactionList, accountIds) => {
   for (const [id, account] of Object.entries(accountIds)) {
     console.log(`Adding ${account.actualId} - ${account.name}`)
     // console.log(transactionList.filter(transaction => transaction.account_id === account.actualId))
     let result = await api.addTransactions(
       account.actualId,
-      transactionList.filter(transaction => transaction.account_id === account.actualId),
+      transactionList.filter(transaction => transaction.account === account.actualId),
       runTransfers = true
     )
     console.log(result)
@@ -224,20 +251,18 @@ const main = async () => {
   const [catIds, catByGroup] = fetchBucketGroups();
   await importCategories(catByGroup, catIds);
 
-  // DEBUG
-  // console.log("Accounts:", accountIds)
-  // console.log("Categories", catIds);
-
-
-  
-  // Fetch and Process Transactions
+  // Fetch Transactions
   const transactions = fetchTransactions();
-  const clean_transactions = await processTransactions(transactions, accountIds, catIds);
 
-  // console.log(clean_transactions)
+  // Fetch Payees
+  const payees = await fetchPayees();
+
+  // Process Transactions
+  const clean_transactions = await processTransactions(transactions, accountIds, catIds, payees);
 
   // Import Transactions by Account
   await importTransactions(clean_transactions, accountIds)
+
 
   await api.shutdown();
 };
