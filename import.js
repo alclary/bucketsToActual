@@ -13,15 +13,15 @@ const fetchBucketAccounts = () => {
     `SELECT id, name, starting_balance FROM account;`
   );
   // Tranform DB output to JSON object
-  const acountIds = {};
+  const accountIds = {};
   for (const obj of getBucketAccts.all()) {
-    acountIds[obj.id] = {
+    accountIds[obj.id] = {
       name: obj.name,
       initial: obj.starting_balance,
       actualId: null,
     };
   }
-  return acountIds;
+  return accountIds;
 };
 
 const fetchBucketGroups = () => {
@@ -59,28 +59,28 @@ const fetchTransactions = () => {
   // Get all transactions from BucketDB in with categories and xfer indication
   const getTransactions = sqliteDB.prepare(
     `SELECT 
-	    account_transaction.id,
+      account_transaction.id AS imported_id,
       account_transaction.created AS 'date',
       account_transaction.account_id,
-      bucket_transaction.bucket_id AS category_id,
+      bucket_transaction.bucket_id AS category,
       CASE 
         WHEN account_transaction.general_cat = 'transfer' THEN 1
         ELSE 0
       END AS transfer,
       COALESCE (bucket_transaction.amount, account_transaction.amount) AS amount,
-      account_transaction.memo
+      account_transaction.memo AS notes
     FROM account_transaction
     FULL JOIN bucket_transaction ON account_transaction.id=bucket_transaction.account_trans_id
     WHERE account_transaction.id IS NOT NULL
-    ORDER BY 'date', account_transaction.id`
+    ORDER BY 'date'`
   )
   return getTransactions.all()
 }
 
-const importAccounts = async (acountIds) => {
+const importAccounts = async (accountIds) => {
   // Create accounts in actual and save the actual account to local object
-  for (const [i, account] of Object.entries(acountIds)) {
-    acountIds[i].actualId = await api.createAccount(
+  for (const [i, account] of Object.entries(accountIds)) {
+    accountIds[i].actualId = await api.createAccount(
       { name: account.name, type: "other" },
       account.initial
     );
@@ -105,25 +105,33 @@ const importCategories = async (catByGroup, catIds) => {
   }
 }
 
-const importTransactions = async (transactions) => {
+const processTransactions = async (transactions, accountIds, catIds) => {
   const completed = []
   for (const [i, transaction] of Object.entries(transactions)) {
     // If transaction in already completed list (search backwards), continue
     if (completed.includes(parseInt(i))) {
       continue
     }
-    // If transaction is a transfer search ahead in array to locate match
+    // If transaction is a transfer, search ahead in array to locate match and link it
     else if (transaction.transfer) {
-      findTransferMatch(transactions, i, completed);
+      processTransfers(transactions, i, completed);
     }
-    // All standard transactions (non-transfers)
-    else {
-      // TODO INSERT Standard Transaction
+    // Translate original (Buckets) ids and data to Actual Ids
+    transaction.date = transaction.date.split(" ")[0] // Remove timestamp
+    transaction.account = accountIds[transaction.account_id].actualId
+    if (transaction.category) {
+      transaction.category = catIds[transaction.category].actualId
     }
+    transaction.cleared = true
     }
+  // remove the transfer duplicate rows from transactions array
+  for (let index of completed) {
+    transactions.splice(index, 1)
+  }
+  return transactions
   }
 
-const findTransferMatch = (transactionList, currentIterator, completed) => {
+const processTransfers = (transactionList, currentIterator, completed) => {
   // If xfer is last element, break (no match)
   if (parseInt(currentIterator) == transactionList.length - 1) {
     console.warn("WARNING: Last element is transfer. No matching transaction.")
@@ -131,12 +139,12 @@ const findTransferMatch = (transactionList, currentIterator, completed) => {
   }
   else {
     for (k = parseInt(currentIterator) + 1; k < transactionList.length; k++) {
-      if (transactionList[k].category_id === null && 
+      if (transactionList[k].category === null && 
         (transactionList[k].amount == transactionList[currentIterator].amount * -1)) {
         // DEBUG 
-        //console.log("MATCHED:", currentIterator, "and", k)
-        // Import Transfer Transaction to Actual
-        
+        // console.log("MATCHED:", currentIterator, "and", k)
+        // Set 'transfer_id' to indicate account of matched transaction
+        transactionList[currentIterator].transfer_id = transactionList[k].account_id
         // Add matched transaction to completed list, to skip in subsequent iteration
         completed.push(k)
         return
@@ -146,6 +154,19 @@ const findTransferMatch = (transactionList, currentIterator, completed) => {
         return
       }
     }
+  }
+}
+
+const importTransactions = async (transactionList, accountIds) => {
+  for (const [id, account] of Object.entries(accountIds)) {
+    console.log(`Adding ${account.actualId} - ${account.name}`)
+    // console.log(transactionList.filter(transaction => transaction.account_id === account.actualId))
+    let result = await api.addTransactions(
+      account.actualId,
+      transactionList.filter(transaction => transaction.account_id === account.actualId),
+      runTransfers = true
+    )
+    console.log(result)
   }
 }
 
@@ -196,24 +217,27 @@ const main = async () => {
   await DEBUGdeleteActualTransactions();
 
   // Fetch and Import Accounts
-  const acountIds = fetchBucketAccounts();
-  await importAccounts(acountIds);
+  const accountIds = fetchBucketAccounts();
+  await importAccounts(accountIds);
 
   // Fetch and Import Categories (aka "Buckets")
   const [catIds, catByGroup] = fetchBucketGroups();
   await importCategories(catByGroup, catIds);
 
   // DEBUG
-  // console.log("Accounts:", acountIds)
+  // console.log("Accounts:", accountIds)
   // console.log("Categories", catIds);
 
-  // Fetch and Import Transactions
+
+  
+  // Fetch and Process Transactions
   const transactions = fetchTransactions();
-  // DEBUG
-  console.log(transactions)
-  await importTransactions(transactions);
+  const clean_transactions = await processTransactions(transactions, accountIds, catIds);
 
+  // console.log(clean_transactions)
 
+  // Import Transactions by Account
+  await importTransactions(clean_transactions, accountIds)
 
   await api.shutdown();
 };
