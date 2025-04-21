@@ -137,10 +137,6 @@ const processTransactions = async (transactions, accountIds, catIds, payees) => 
       if (transaction.payee) {
         clean_transaction['payee'] = transaction.payee
       }
-      // if (transaction.transfer_id) {
-      //   clean_transaction['transfer_id'] = transaction.transfer_id
-      // }
-      // console.log(clean_transaction)
       cleaned_transactions.push(clean_transaction)
     }
   }
