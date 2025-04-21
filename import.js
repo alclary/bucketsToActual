@@ -157,9 +157,7 @@ const processTransfers = (transactionList, currentIterator, skip, accountIds, pa
     for (k = parseInt(currentIterator) + 1; k < transactionList.length; k++) {
       if (transactionList[k].category === null && 
         (transactionList[k].amount == transactionList[currentIterator].amount * -1)) {
-        // DEBUG 
-        // console.log("MATCHED:", currentIterator, "and", k)
-        // Set 'transfer_id' to indicate account of matched transaction
+        // Translate k record's account ID to the actual ID then set that as the current record's payee
         let match_actualId = accountIds[transactionList[k].account_id].actualId
         transactionList[currentIterator]['payee'] = payees[match_actualId]
         // Add matched transaction to skip list, to skip in subsequent iteration
@@ -187,13 +185,10 @@ const fetchPayees = async () => {
 const importTransactions = async (transactionList, accountIds) => {
   for (const [id, account] of Object.entries(accountIds)) {
     console.log(`Adding ${account.actualId} - ${account.name}`)
-    // console.log(transactionList.filter(transaction => transaction.account_id === account.actualId))
-    let result = await api.addTransactions(
+    await api.importTransactions(
       account.actualId,
       transactionList.filter(transaction => transaction.account === account.actualId),
-      runTransfers = true
     )
-    console.log(result)
   }
 }
 
@@ -262,7 +257,6 @@ const main = async () => {
 
   // Import Transactions by Account
   await importTransactions(clean_transactions, accountIds)
-
 
   await api.shutdown();
 };
